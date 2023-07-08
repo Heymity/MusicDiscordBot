@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>TRACE;DEFAULTDIR</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Modules\Poll\**" />
+    <Compile Remove="Modules\Video\**" />
+    <EmbeddedResource Remove="Modules\Poll\**" />
+    <EmbeddedResource Remove="Modules\Video\**" />
+    <None Remove="Modules\Poll\**" />
+    <None Remove="Modules\Video\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Discord.Net" Version="2.3.0" />
+  </ItemGroup>
+
+</Project>
