@@ -8,7 +8,7 @@ namespace DiscordBot.Utilities
     {
         public static async Task<string> GetAsync(string uri)
         {
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
+            var request = (HttpWebRequest)WebRequest.Create(uri);
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
 
             using (HttpWebResponse response = (HttpWebResponse)await request.GetResponseAsync())

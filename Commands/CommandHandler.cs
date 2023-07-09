@@ -1,8 +1,10 @@
-﻿using Discord.Commands;
+﻿using System;
+using Discord.Commands;
 using Discord.WebSocket;
 using DiscordBot.Utilities.Managers.Storage;
 using System.Reflection;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace DiscordBot.Commands
 {
@@ -11,11 +13,16 @@ namespace DiscordBot.Commands
         private readonly DiscordSocketClient _client;
         private readonly CommandService _commands;
 
+        private readonly IServiceProvider _services;
+        private readonly ILogger _logger;
+
         // Retrieve client and CommandService instance via ctor
-        public CommandHandler(DiscordSocketClient client, CommandService commands)
+        public CommandHandler(DiscordSocketClient client, CommandService commands, IServiceProvider services, ILogger<CommandHandler> logger)
         {
             _commands = commands;
             _client = client;
+            _services = services;
+            _logger = logger;
         }
 
         public async Task InstallCommandsAsync()
@@ -32,7 +39,16 @@ namespace DiscordBot.Commands
             // If you do not use Dependency Injection, pass null.
             // See Dependency Injection guide for more information.
             await _commands.AddModulesAsync(assembly: Assembly.GetEntryAssembly(),
-                                            services: null);
+                                            services: _services);
+
+            foreach (var module in _commands.Modules)
+            {
+                Console.WriteLine(module.Name);
+                foreach (var co in module.Commands)
+                {
+                    Console.WriteLine($" -- {co.Name}");
+                }
+            }
         }
 
         private async Task HandleCommandAsync(SocketMessage messageParam)
@@ -65,7 +81,7 @@ namespace DiscordBot.Commands
             await _commands.ExecuteAsync(
                 context: context,
                 argPos: argPos,
-                services: null);
+                services: _services);
         }
     }
 }
