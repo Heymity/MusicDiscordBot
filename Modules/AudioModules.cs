@@ -25,21 +25,38 @@ public class AudioModule : ModuleBase<SocketCommandContext>
     }
 
     [Command("Join")]
-    public async Task JoinAsync() {
+    public async Task JoinAsync([Remainder] string channelName = "") {
         if (_lavaNode.HasPlayer(Context.Guild)) {
             await ReplyAsync("I'm already connected to a voice channel!");
             return;
         }
 
-        var voiceState = Context.User as IVoiceState;
-        if (voiceState?.VoiceChannel == null) {
-            await ReplyAsync("You must be connected to a voice channel!");
-            return;
+        IVoiceChannel channel;
+
+        if (string.IsNullOrWhiteSpace(channelName))
+        {
+            var voiceState = Context.User as IVoiceState;
+            if (voiceState?.VoiceChannel == null)
+            {
+                await ReplyAsync("You must be connected to a voice channel!");
+                return;
+            }
+
+            channel = voiceState.VoiceChannel;
+        }
+        else
+        {
+            channel = Context.Guild.VoiceChannels.FirstOrDefault(v => v.Name == channelName);
+            if (channel is null)
+            {
+                await ReplyAsync("Não achei esse canal ai não");
+                return;
+            }
         }
 
         try {
-            await _lavaNode.JoinAsync(voiceState.VoiceChannel, Context.Channel as ITextChannel);
-            await ReplyAsync($"Joined {voiceState.VoiceChannel.Name}!");
+            await _lavaNode.JoinAsync(channel, Context.Channel as ITextChannel);
+            await ReplyAsync($"Joined {channel.Name}!");
         }
         catch (Exception exception) {
             await ReplyAsync(exception.Message);
@@ -69,9 +86,11 @@ public class AudioModule : ModuleBase<SocketCommandContext>
     }
 
     [Command("Play")]
+    [Alias("p")]
+    [Summary("Toca uma música né, n sei oq vc esperava")]
     public async Task PlayAsync([Remainder] string searchQuery) {
         if (string.IsNullOrWhiteSpace(searchQuery)) {
-            await ReplyAsync("Please provide search terms.");
+            await ReplyAsync("O besta, vc tem q falar oq quer ouvir ne");
             return;
         }
         
@@ -80,22 +99,57 @@ public class AudioModule : ModuleBase<SocketCommandContext>
         var searchType = SearchType.YouTube;
         if (searchQuery.StartsWith("http")) searchType = SearchType.Direct; 
         
-        var searchResponse = await _lavaNode.SearchAsync(searchType, searchQuery);
+        var searchResponse = await _lavaNode.SearchAsync(searchType, searchQuery); 
+        
         if (searchResponse.Status is SearchStatus.LoadFailed or SearchStatus.NoMatches) {
             await ReplyAsync($"I wasn't able to find anything for `{searchQuery}`.");
             return;
         }
 
+        /*foreach (var track in searchResponse.Tracks)
+        {
+            Console.WriteLine(track.Title);
+        }*/
+        
         var player = _lavaNode.GetPlayer(Context.Guild);
         if (!string.IsNullOrWhiteSpace(searchResponse.Playlist.Name)) {
             player.Queue.Enqueue(searchResponse.Tracks);
-            await ReplyAsync($"Enqueued {searchResponse.Tracks.Count} songs.");
+            
+            if (searchType is SearchType.Direct)
+                await ReplyAsync($"Enqueued {searchResponse.Tracks.Count} songs.");
+            else
+            {
+                var track = searchResponse.Tracks.First();
+                var artwork = await track.FetchArtworkAsync();
+
+                var embed = new EmbedBuilder()
+                    .WithAuthor(track.Author, Context.Client.CurrentUser.GetAvatarUrl(), track.Url)
+                    .WithTitle(
+                        $"Playlist {searchResponse.Playlist.Name} adicionada! ({searchResponse.Tracks.Count} musicas)")
+                    .WithImageUrl(artwork)
+                    .WithColor(GetColorFromSting(track.Title));
+
+                await ReplyAsync(embed: embed.Build());
+            }
         }
         else {
             var track = searchResponse.Tracks.FirstOrDefault();
             player.Queue.Enqueue(track);
 
-            await ReplyAsync($"Enqueued {track?.Title}");
+            if (searchType is SearchType.Direct)
+                await ReplyAsync($"Enqueued {track?.Title}");
+            else
+            {
+                var artwork = await track.FetchArtworkAsync();
+
+                var embed = new EmbedBuilder()
+                    .WithAuthor(track?.Author, Context.Client.CurrentUser.GetAvatarUrl(), track?.Url)
+                    .WithTitle($"{track?.Title} adicionada!")
+                    .WithImageUrl(artwork)
+                    .WithColor(GetColorFromSting(track?.Title));
+
+                await ReplyAsync(embed: embed.Build());
+            }
         }
 
         if (player.PlayerState is PlayerState.Playing or PlayerState.Paused) {
@@ -183,6 +237,12 @@ public class AudioModule : ModuleBase<SocketCommandContext>
             await ReplyAsync("Woaaah there, I can't skip when nothing is playing.");
             return;
         }
+
+        if (player.Queue.Count == 0)
+        {
+            await StopAsync();
+            return;
+        }
         
         try {
             var (oldTrack, currenTrack) = await player.SkipAsync();
@@ -191,8 +251,6 @@ public class AudioModule : ModuleBase<SocketCommandContext>
         catch (Exception exception) {
             await ReplyAsync(exception.Message);
         }
-
-        _audioService.VoteQueue.Clear();
     }
 
     [Command("Seek")]
@@ -299,14 +357,22 @@ public class AudioModule : ModuleBase<SocketCommandContext>
     }
 
     [Command("Queue")]
+    [Alias("q")]
     public Task QueueAsync() {
         if (!_lavaNode.TryGetPlayer(Context.Guild, out var player)) {
             return ReplyAsync("I'm not connected to a voice channel.");
         }
 
-        return ReplyAsync(player.PlayerState != PlayerState.Playing
-            ? "Woaaah there, I'm not playing any tracks."
-            : string.Join(Environment.NewLine, player.Queue.Select(x => x.Title)));
+        if (player.PlayerState != PlayerState.Playing)
+            return ReplyAsync("I'm not playing any tracks.");
+        
+        var embed = new EmbedBuilder()
+            .WithTitle("Fila")
+            .WithColor(Color.Green)
+            .WithDescription($"*Tocando Agora:* {player.Track.Title}{Environment.NewLine}" + string.Join(Environment.NewLine, player.Queue.Select((x, i) => $"{i}. {x.Title}")))
+            .Build();
+
+        return ReplyAsync(embed: embed);
     }
 
     private async Task SendLyricsAsync(string lyrics) {
@@ -327,5 +393,16 @@ public class AudioModule : ModuleBase<SocketCommandContext>
         }
 
         await ReplyAsync($"```{stringBuilder}```");
+    }
+    
+    private Color GetColorFromSting(string str)
+    {
+        int dividerIndex = (int)Math.Floor(str.Length / 3d);
+
+        int r = Math.Abs(str.Substring(0, dividerIndex).GetHashCode() % 255);
+        int g = Math.Abs(str.Substring(dividerIndex, 2 * dividerIndex).GetHashCode() % 255);
+        int b = Math.Abs(str.Remove(0, 2 * dividerIndex).GetHashCode() % 255);
+
+        return new Color(r, g, b);
     }
 }

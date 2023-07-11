@@ -3,7 +3,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Discord.Interactions;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using Victoria;
 using Victoria.Enums;
 using Victoria.EventArgs;
@@ -13,7 +15,6 @@ namespace DiscordBot;
 public sealed class AudioService {
     private readonly LavaNode<XLavaPlayer> _lavaNode;
     private readonly ILogger _logger;
-    public readonly HashSet<ulong> VoteQueue;
     private readonly ConcurrentDictionary<ulong, CancellationTokenSource> _disconnectTokens;
 
     public AudioService(LavaNode<XLavaPlayer> lavaNode, ILoggerFactory loggerFactory) {
@@ -33,17 +34,29 @@ public sealed class AudioService {
         _lavaNode.OnTrackException += OnTrackException;
         _lavaNode.OnTrackStuck += OnTrackStuck;
         _lavaNode.OnWebSocketClosed += OnWebSocketClosed;
-
-        VoteQueue = new HashSet<ulong>();
     }
 
-    private Task OnPlayerUpdated(PlayerUpdateEventArgs arg) {
-        _logger.LogInformation($"Track update received for {arg.Track.Title}: {arg.Position}");
-        return Task.CompletedTask;
+    private async Task OnPlayerUpdated(PlayerUpdateEventArgs arg) {
+        _logger.LogInformation("Track update received for {TrackTitle}: {ArgPosition}/{TrackDuration}", arg.Track.Title, arg.Position, arg.Player.Track.Duration);
+        if (arg.Player.Track.Duration.Subtract(arg.Position.Value) <= TimeSpan.FromSeconds(6))
+        {
+            _logger.LogInformation("Last Update");
+            
+            var trackId = arg.Player.Track.Id;
+            var trackPos = arg.Track.Position;
+            await Task.Delay(7500);
+
+            if (arg.Player.Track.Id != trackId || arg.Player.Track.Position != trackPos ||
+                arg.Player.Queue.Count == 0 ||
+                arg.Player.PlayerState is not PlayerState.Playing) return;
+            
+            _logger.LogInformation("Track didn\'t change, playstate is {PlayerPlayerState}, next in queue is {Title}", arg.Player.PlayerState, arg.Player.Queue.Peek().Title);
+            await arg.Player.SkipAsync();
+        }
     }
 
     private Task OnStatsReceived(StatsEventArgs arg) {
-        _logger.LogInformation($"Lavalink has been up for {arg.Uptime}.");
+        _logger.LogInformation("Lavalink has been up for {ArgUptime}", arg.Uptime);
         return Task.CompletedTask;
     }
 
@@ -62,14 +75,15 @@ public sealed class AudioService {
     }
 
     private async Task OnTrackEnded(TrackEndedEventArgs args) {
+        Console.WriteLine($"TrackEnded for reason: {args.Reason}");
         if (args.Reason != TrackEndReason.Finished) {
             return;
         }
 
         var player = args.Player;
         if (!player.Queue.TryDequeue(out var lavaTrack)) {
-            await player.TextChannel.SendMessageAsync("Queue completed! Please add more tracks to rock n' roll!");
-            _ = InitiateDisconnectAsync(args.Player, TimeSpan.FromSeconds(10));
+            await player.TextChannel.SendMessageAsync("Acabou as musicas :( vou quitar da call em 5min se n me querem mais");
+            _ = InitiateDisconnectAsync(args.Player, TimeSpan.FromMinutes(5));
             return;
         }
 
@@ -104,22 +118,21 @@ public sealed class AudioService {
     }
 
     private async Task OnTrackException(TrackExceptionEventArgs arg) {
-        _logger.LogError($"Track {arg.Track.Title} threw an exception. Please check Lavalink console/logs.");
+        _logger.LogError("Track {TrackTitle} threw an exception. Please check Lavalink console/logs", arg.Track.Title);
         arg.Player.Queue.Enqueue(arg.Track);
         await arg.Player.TextChannel.SendMessageAsync(
             $"{arg.Track.Title} has been re-added to queue after throwing an exception.");
     }
 
     private async Task OnTrackStuck(TrackStuckEventArgs arg) {
-        _logger.LogError(
-            $"Track {arg.Track.Title} got stuck for {arg.Threshold}ms. Please check Lavalink console/logs.");
+        _logger.LogError("Track {TrackTitle} got stuck for {ArgThreshold}ms. Please check Lavalink console/logs", arg.Track.Title, arg.Threshold);
         arg.Player.Queue.Enqueue(arg.Track);
         await arg.Player.TextChannel.SendMessageAsync(
             $"{arg.Track.Title} has been re-added to queue after getting stuck.");
     }
 
     private Task OnWebSocketClosed(WebSocketClosedEventArgs arg) {
-        _logger.LogCritical($"Discord WebSocket connection closed with following reason: {arg.Reason}");
+        _logger.LogCritical("Discord WebSocket connection closed with following reason: {ArgReason}", arg.Reason);
         return Task.CompletedTask;
     }
 }

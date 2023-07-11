@@ -60,10 +60,10 @@ namespace DiscordBot
                 .AddSingleton<CommandService>()
                 .AddSingleton<CommandHandler>()
                 .AddSingleton<AudioService>()
-                .Configure<CommandServiceConfig>(x => new CommandServiceConfig
+                .Configure<CommandServiceConfig>(x =>
                 {
-                    CaseSensitiveCommands = false,
-                    LogLevel = LogSeverity.Debug,
+                    x.CaseSensitiveCommands = false;
+                    x.LogLevel = LogSeverity.Debug;
                 })
                 .AddSingleton<LavaConfig>()
                 .AddSingleton<LavaNode<XLavaPlayer>>()
